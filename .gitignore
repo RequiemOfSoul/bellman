@@ -4,3 +4,4 @@ pkg
 *.key
 *.proof
 *.data
+/.idea/*
