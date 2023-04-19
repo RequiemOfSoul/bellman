@@ -1,4 +1,3 @@
-#[allow(unused_macros)]
 
 cfg_if! {
     if #[cfg(feature = "nolog")] {

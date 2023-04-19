@@ -549,71 +549,83 @@ fn future_based_buffered_dense_multiexp_impl<G: CurveAffine>(
     this
 }
 
+pub fn dense_multiexp_gpu<G: CurveAffine>(
+    pool: &Worker,
+    bases: &[G],
+    exponents: &[<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr]
+) -> Result<<G as CurveAffine>::Projective, SynthesisError>{
+    let mut kern = gpu::LockedMultiexpKernel::<G::Engine>::new(20, false);
+    let result = multiexp_gpu(
+        pool,
+        bases,
+        FullDensity,
+        exponents,
+        &mut kern
+    ).wait()?;
 
+    Ok(result)
+}
 
 /// Perform multi-exponentiation. The caller is responsible for ensuring the
 /// query size is the same as the number of exponents.
-pub fn multiexp_gpu<Q, D, G, S>(
+pub fn multiexp_gpu<Q, D, G>(
     pool: &Worker,
-    bases: S,
+    bases: &[G],
     density_map: D,
-    exponents: Arc<Vec<<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr>>,
-    kern: &mut Option<gpu::LockedMultiexpKernel<G::Engine>>,
+    exponents: &[<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr],
+    kern: &mut gpu::LockedMultiexpKernel<G::Engine>,
 ) -> WorkerFuture< <G as CurveAffine>::Projective, SynthesisError>
     where
             for<'a> &'a Q: QueryDensity,
             D: Send + Sync + 'static + Clone + AsRef<Q>,
             G: CurveAffine,
             G::Engine: pairing::Engine,
-            S: SourceBuilder<G>,
 {
-    if let Some(ref mut kern) = kern {
-        if let Ok(p) = kern.with(|k: &mut gpu::MultiexpKernel<G::Engine>| {
-            info!("start ready exponents and bases"); // 1s+
-            let mut exps = vec![exponents[0]; exponents.len()];
-            let mut n = 0;
-            for (&e, d) in exponents.iter().zip(density_map.as_ref().iter()) {
-                if d {
-                    exps[n] = e;
-                    n += 1;
-                }
+    if let Ok(p) = kern.with(|k: &mut gpu::MultiexpKernel<G::Engine>| {
+        info!("start ready exponents and bases"); // 1s+
+        let mut exps = vec![exponents[0]; exponents.len()];
+        let mut n = 0;
+        for (&e, d) in exponents.iter().zip(density_map.as_ref().iter()) {
+            if d {
+                exps[n] = e;
+                n += 1;
             }
-
-            let (bss, skip) = bases.clone().get();
-            info!("end ready exponents and bases");
-            k.multiexp(pool, bss, Arc::new(exps.clone()), skip, n)
-
-        }) {
-            return  pool.compute(move || Ok(p));
         }
-    }
 
-    let c = if exponents.len() < 32 {
-        3u32
+        info!("end ready exponents and bases");
+        k.multiexp(pool, bases, Arc::new(exps), 0, n)
+    }) {
+        return pool.compute(move || Ok(p));
     } else {
-        (f64::from(exponents.len() as u32)).ln().ceil() as u32
-    };
-
-    if let Some(query_size) = density_map.as_ref().get_query_size() {
-        // If the density map has a known query size, it should not be
-        // inconsistent with the number of exponents.
-
-        assert!(query_size == exponents.len());
+        panic!("GPU multi-exp computation failed!")
     }
 
-    info!("!!!!!!!!!!!!!!!!!begin multiexp_inner");
-    let future = multiexp_inner(pool, bases, density_map, exponents, 0, c, true);
-    info!("!!!!!!!!!!!!!!!!!end multiexp_inner");
-    #[cfg(feature = "gpu")]
-        {
-            // Do not give the control back to the caller till the
-            // multiexp is done. We may want to reacquire the GPU again
-            // between the multiexps.
-            let result = future.wait();
-            pool.compute(move || result)
-        }
-    #[cfg(not(feature = "gpu"))]
-        future
+    // let c = if exponents.len() < 32 {
+    //     3u32
+    // } else {
+    //     (f64::from(exponents.len() as u32)).ln().ceil() as u32
+    // };
+    //
+    // if let Some(query_size) = density_map.as_ref().get_query_size() {
+    //     // If the density map has a known query size, it should not be
+    //     // inconsistent with the number of exponents.
+    //
+    //     assert_eq!(query_size, exponents.len());
+    // }
+    //
+    // info!("!!!!!!!!!!!!!!!!!begin multiexp_inner");
+    // let future = multiexp_inner(pool, bases, density_map, exponents, 0, c, true);
+    // info!("!!!!!!!!!!!!!!!!!end multiexp_inner");
+    // #[cfg(feature = "gpu")]
+    //     {
+    //         // Do not give the control back to the caller till the
+    //         // multiexp is done. We may want to reacquire the GPU again
+    //         // between the multiexps.
+    //         let result = future.wait();
+    //         pool.compute(move || result)
+    //     }
+    // #[cfg(not(feature = "gpu"))]
+    //     future
 }
 
 
@@ -1115,7 +1127,7 @@ pub fn create_multiexp_kernel<E>(_log_d: usize, priority: bool) -> Option<gpu::M
 
 #[cfg(feature = "gpu")]
 #[test]
-pub fn gpu_multiexp_consistency() {
+pub fn gpu_multiexp_consistency_bls12_381() {
     use crate::pairing::bls12_381::Bls12;
     use std::time::Instant;
     use rand::{self, Rand};
@@ -1125,7 +1137,7 @@ pub fn gpu_multiexp_consistency() {
 
     const MAX_LOG_D: usize = 20;
     const START_LOG_D: usize = 10;
-    let mut kern = Some(gpu::LockedMultiexpKernel::<Bls12>::new(MAX_LOG_D, false));
+    let mut kern = gpu::LockedMultiexpKernel::<Bls12>::new(MAX_LOG_D, false);
     let pool = Worker::new();
 
     let rng = &mut rand::thread_rng();
@@ -1145,21 +1157,17 @@ pub fn gpu_multiexp_consistency() {
     }
 
     for log_d in START_LOG_D..(MAX_LOG_D + 1) {
-        let g = Arc::new(bases.clone());
 
         let samples = 1 << log_d;
         println!("Testing Multiexp for {} elements...", samples);
 
-        let v = Arc::new(
+        let v =
             (0..samples)
                 .map(|_| <Bls12 as ScalarEngine>::Fr::rand(rng).into_repr())
-                .collect::<Vec<_>>(),
-        );
+                .collect::<Vec<_>>();
 
         let mut now = Instant::now();
-        let gpu = multiexp_gpu(&pool, (g.clone(), 0), FullDensity, v.clone(), &mut kern)
-            .wait()
-            .unwrap();
+        let gpu = dense_multiexp_gpu(&pool, &bases, &v).unwrap();
         let gpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
         println!("GPU took {}ms.", gpu_dur);
 
@@ -1182,7 +1190,7 @@ pub fn gpu_multiexp_consistency_bn256() {
 
     const MAX_LOG_D: usize = 20;
     const START_LOG_D: usize = 10;
-    let mut kern = Some(gpu::LockedMultiexpKernel::<Bn256>::new(MAX_LOG_D, false));
+    let mut kern = gpu::LockedMultiexpKernel::<Bn256>::new(MAX_LOG_D, false);
     let pool = Worker::new();
 
     let rng = &mut rand::thread_rng();
@@ -1218,13 +1226,9 @@ pub fn gpu_multiexp_consistency_bn256() {
 
         println!("CPU took {}ms.", cpu_dur);
 
-        let v = Arc::new(v);
-        let g = Arc::new(g);
 
         let mut now = Instant::now();
-        let gpu = multiexp_gpu(&pool, (g.clone(), 0), FullDensity, v.clone(), &mut kern)
-            .wait()
-            .unwrap();
+        let gpu = dense_multiexp_gpu(&pool, &g, &v).unwrap();
         let gpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
         println!("GPU took {}ms.", gpu_dur);
 
