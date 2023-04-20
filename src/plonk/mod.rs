@@ -143,7 +143,7 @@ pub fn prove_native_by_steps<E: Engine, C: crate::plonk::better_cs::cs::Circuit<
 
     use std::time::Instant;
 
-    let mut assembly = self::better_cs::prover::ProverAssembly::new_with_size_hints(setup.num_inputs, setup.n);
+    let mut assembly = better_cs::prover::ProverAssembly::new_with_size_hints(setup.num_inputs, setup.n);
 
     let subtime = Instant::now();
 
@@ -162,14 +162,15 @@ pub fn prove_native_by_steps<E: Engine, C: crate::plonk::better_cs::cs::Circuit<
         T::new()
     };
 
-    let mut precomputed_omegas = crate::plonk::better_cs::prover::prove_steps::PrecomputedOmegas::< E::Fr, BitReversedOmegas<E::Fr> >::None;
-    let mut precomputed_omegas_inv = crate::plonk::better_cs::prover::prove_steps::PrecomputedOmegas::< E::Fr, OmegasInvBitreversed<E::Fr> >::None;
+    let mut precomputed_omegas = better_cs::prover::prove_steps::PrecomputedOmegas::< E::Fr, BitReversedOmegas<E::Fr> >::None;
+    let mut precomputed_omegas_inv = better_cs::prover::prove_steps::PrecomputedOmegas::< E::Fr, OmegasInvBitreversed<E::Fr> >::None;
 
     let mut proof = Proof::<E, PlonkCsWidth4WithNextStepParams>::empty();
 
     let subtime = Instant::now();
 
-    let (first_state, first_message) = assembly.first_step_with_monomial_form_key(
+    let (first_state, first_message) =
+        assembly.first_step_with_monomial_form_key(
         &worker,
         csr_mon_basis,
         &mut precomputed_omegas_inv

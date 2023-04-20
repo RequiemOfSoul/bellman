@@ -554,7 +554,9 @@ pub fn dense_multiexp_gpu<G: CurveAffine>(
     bases: &[G],
     exponents: &[<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr]
 ) -> Result<<G as CurveAffine>::Projective, SynthesisError>{
+    let timer = std::time::Instant::now();
     let mut kern = gpu::LockedMultiexpKernel::<G::Engine>::new(20, false);
+    println!("Create gpu LockedMultiexpKernel elapsed: {}", timer.elapsed().as_millis());
     let result = multiexp_gpu(
         pool,
         bases,

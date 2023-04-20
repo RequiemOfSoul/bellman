@@ -952,7 +952,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGateEquation> Constra
         witness_assignments: &[E::Fr]
     ) -> Result<(), SynthesisError> {
         // check that gate is ok for config
-        debug_assert!(check_gate_is_allowed_for_params::<E, P, G>(&gate), format!("supplied params do not work with gate {:?}", gate));
+        debug_assert!(check_gate_is_allowed_for_params::<E, P, G>(&gate), "supplied params do not work with gate {:?}", gate);
 
         let n = self.trace_step_for_batch.unwrap();
         // make zero-enumerated index

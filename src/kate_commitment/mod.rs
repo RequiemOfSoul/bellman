@@ -342,7 +342,7 @@ pub fn commit_using_monomials<E: Engine>(
 
     let subtime = Instant::now();
 
-    let res = multiexp::dense_multiexp::<E::G1Affine>(
+    let res = multiexp::dense_multiexp_gpu::<E::G1Affine>(
         &worker,
         &crs.g1_bases[..scalars_repr.len()],
         &scalars_repr
@@ -378,7 +378,7 @@ pub fn commit_using_values<E: Engine>(
 
     let subtime = Instant::now();
 
-    let res = multiexp::dense_multiexp::<E::G1Affine>(
+    let res = multiexp::dense_multiexp_gpu::<E::G1Affine>(
         &worker,
         &crs.g1_bases,
         &scalars_repr
@@ -403,7 +403,7 @@ pub fn commit_using_raw_values<E: Engine>(
         &values
     )?;
 
-    let res = multiexp::dense_multiexp::<E::G1Affine>(
+    let res = multiexp::dense_multiexp_gpu::<E::G1Affine>(
         &worker,
         &crs.g1_bases[0..values.len()],
         &scalars_repr
@@ -456,7 +456,7 @@ pub fn commit_using_values_on_coset<E: Engine>(
         &poly.as_ref()
     )?;
 
-    let res = multiexp::dense_multiexp::<E::G1Affine>(
+    let res = multiexp::dense_multiexp_gpu::<E::G1Affine>(
         &worker,
         &crs.g1_bases,
         &scalars_repr
