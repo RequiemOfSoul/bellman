@@ -21,6 +21,7 @@ use crate::byteorder::BigEndian;
 use crate::byteorder::ReadBytesExt;
 use crate::byteorder::WriteBytesExt;
 use std::io::{Read, Write};
+use crate::gpu::LockedMultiexpKernel;
 
 use crate::plonk::better_cs::keys::*;
 
@@ -311,6 +312,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
 
         let num_state_polys = <Self as ConstraintSystem<E>>::Params::STATE_WIDTH;
         let num_witness_polys = <Self as ConstraintSystem<E>>::Params::WITNESS_WIDTH;
+        let mut gpu_kern = Some(LockedMultiexpKernel::<E>::new(20, false));
 
         let mut values_storage = self.make_assembled_poly_storage(worker, true)?;
 
@@ -364,10 +366,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
         for i in 0..num_state_polys {
             let key = PolyIdentifier::VariablesPolynomial(i);
             let poly_ref = monomials_storage.get_poly(key);
-            let commitment = commit_using_monomials(
+            let commitment = commit_using_monomials_gpu(
                 poly_ref,
                 mon_crs,
-                &worker
+                &worker,
+                &mut gpu_kern
             )?;
 
             commit_point_as_xy::<E, T>(
@@ -381,10 +384,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
         for i in 0..num_witness_polys {
             let key = PolyIdentifier::VariablesPolynomial(i);
             let poly_ref = monomials_storage.get_poly(key);
-            let commitment = commit_using_monomials(
+            let commitment = commit_using_monomials_gpu(
                 poly_ref,
                 mon_crs,
-                &worker
+                &worker,
+                &mut gpu_kern
             )?;
 
             commit_point_as_xy::<E, T>(
@@ -605,10 +609,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
                 )
             };
 
-            let s_poly_commitment = commit_using_monomials(
+            let s_poly_commitment = commit_using_monomials_gpu(
                 &s_poly_monomial,
                 mon_crs,
-                &worker
+                &worker,
+                &mut gpu_kern
             )?;
 
             commit_point_as_xy::<E, T>(
@@ -746,10 +751,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
             &E::Fr::one()
         )?;
 
-        let copy_permutation_z_poly_commitment = commit_using_monomials(
+        let copy_permutation_z_poly_commitment = commit_using_monomials_gpu(
             &copy_permutation_z_in_monomial_form,
             mon_crs,
-            &worker
+            &worker,
+            &mut gpu_kern
         )?;
 
         commit_point_as_xy::<E, T>(
@@ -850,10 +856,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
                 &E::Fr::one()
             )?;
 
-            let lookup_z_poly_commitment = commit_using_monomials(
+            let lookup_z_poly_commitment = commit_using_monomials_gpu(
                 &z,
                 mon_crs,
-                &worker
+                &worker,
+                &mut gpu_kern
             )?;
     
             commit_point_as_xy::<E, T>(
@@ -1374,10 +1381,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
         let mut t_poly_parts = t_poly.break_into_multiples(required_domain_size)?;
 
         for part in t_poly_parts.iter() {
-            let commitment = commit_using_monomials(
+            let commitment = commit_using_monomials_gpu(
                 part,
                 mon_crs,
-                &worker
+                &worker,
+                &mut gpu_kern
             )?;
 
             commit_point_as_xy::<E, T>(
@@ -2081,7 +2089,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
         poly_to_divide_at_z_omega.scale(&worker, multiopening_challenge);
 
         // {
-        //     let tmp = commit_using_monomials(
+        //     let tmp = commit_using_monomials_gpu(
         //         &poly_to_divide_at_z_omega,
         //         &mon_crs,
         //         &worker
@@ -2152,16 +2160,18 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
         let open_at_z_omega = polys.pop().unwrap().0;
         let open_at_z = polys.pop().unwrap().0;
 
-        let opening_at_z = commit_using_monomials(
+        let opening_at_z = commit_using_monomials_gpu(
             &open_at_z, 
             &mon_crs,
-            &worker
+            &worker,
+            &mut gpu_kern
         )?;
 
-        let opening_at_z_omega = commit_using_monomials(
+        let opening_at_z_omega = commit_using_monomials_gpu(
             &open_at_z_omega, 
             &mon_crs,
-            &worker
+            &worker,
+            &mut gpu_kern
         )?;
 
         proof.opening_proof_at_z = opening_at_z;

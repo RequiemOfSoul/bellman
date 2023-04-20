@@ -340,7 +340,8 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
     pub(crate) fn first_step_with_lagrange_form_key(
         self, 
         worker: &Worker, 
-        crs_vals: &Crs<E, CrsForLagrangeForm>, 
+        crs_vals: &Crs<E, CrsForLagrangeForm>,
+        kern: &mut Option<LockedMultiexpKernel<E>>,
     ) -> Result<(
         FirstPartialProverState<E, PlonkCsWidth4WithNextStepParams>, 
         FirstProverMessage<E, PlonkCsWidth4WithNextStepParams>
@@ -377,10 +378,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         };
 
         for wire_poly in full_assignments.iter() {
-            let commitment = commit_using_raw_values(
+            let commitment = commit_using_raw_values_gpu(
                 &wire_poly, 
                 &crs_vals, 
-                &worker
+                &worker,
+                kern
             )?;
 
             first_message.wire_commitments.push(commitment);

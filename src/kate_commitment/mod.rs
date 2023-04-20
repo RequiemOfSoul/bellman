@@ -433,6 +433,44 @@ pub fn commit_using_values<E: Engine>(
     Ok(res.into_affine())
 }
 
+pub fn commit_using_values_gpu<E: Engine>(
+    poly: &Polynomial<E::Fr, Values>,
+    crs: &Crs<E, CrsForLagrangeForm>,
+    worker: &Worker,
+    kern: &mut Option<LockedMultiexpKernel<E>>,
+) -> Result<E::G1Affine, SynthesisError> {
+    println!("Committing values over domain");
+    assert_eq!(poly.size(), crs.g1_bases.len());
+
+    use std::time::Instant;
+
+    let now = Instant::now();
+
+    let subtime = Instant::now();
+
+    let scalars_repr = elements_into_representations::<E>(
+        &worker,
+        &poly.as_ref()
+    )?;
+
+    println!("Scalars conversion taken {:?}", subtime.elapsed());
+
+    let subtime = Instant::now();
+
+    let res = multiexp::dense_multiexp_gpu::<E::G1Affine>(
+        &worker,
+        &crs.g1_bases,
+        &scalars_repr,
+        kern
+    )?;
+
+    println!("Multiexp taken {:?}", subtime.elapsed());
+
+    println!("Commtiment taken {:?}", now.elapsed());
+
+    Ok(res.into_affine())
+}
+
 pub fn commit_using_raw_values<E: Engine>(
     values: &[E::Fr],
     crs: &Crs<E, CrsForLagrangeForm>,
@@ -449,6 +487,29 @@ pub fn commit_using_raw_values<E: Engine>(
         &worker,
         &crs.g1_bases[0..values.len()],
         &scalars_repr
+    )?;
+
+    Ok(res.into_affine())
+}
+
+pub fn commit_using_raw_values_gpu<E: Engine>(
+    values: &[E::Fr],
+    crs: &Crs<E, CrsForLagrangeForm>,
+    worker: &Worker,
+    kern: &mut Option<LockedMultiexpKernel<E>>,
+) -> Result<E::G1Affine, SynthesisError> {
+    assert_eq!(values.len().next_power_of_two(), crs.g1_bases.len());
+    println!("Committing raw values over domain");
+    let scalars_repr = elements_into_representations::<E>(
+        &worker,
+        &values
+    )?;
+
+    let res = multiexp::dense_multiexp_gpu::<E::G1Affine>(
+        &worker,
+        &crs.g1_bases[0..values.len()],
+        &scalars_repr,
+        kern
     )?;
 
     Ok(res.into_affine())
