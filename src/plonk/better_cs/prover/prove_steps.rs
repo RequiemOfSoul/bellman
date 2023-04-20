@@ -408,10 +408,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
     }
 
     pub(crate) fn first_step_with_monomial_form_key<CPI: CTPrecomputations<E::Fr>>(
-        self, 
-        worker: &Worker, 
-        crs_mons: &Crs<E, CrsForMonomialForm>, 
-        precomputed_omegas_inv: &mut PrecomputedOmegas<E::Fr, CPI>
+        mut self,
+        worker: &Worker,
+        crs_mons: &Crs<E, CrsForMonomialForm>,
+        precomputed_omegas_inv: &mut PrecomputedOmegas<E::Fr, CPI>,
+        gpu_kern: &mut Option<LockedMultiexpKernel<E>>,
     ) -> Result<(
         FirstPartialProverState<E, PlonkCsWidth4WithNextStepParams>, 
         FirstProverMessage<E, PlonkCsWidth4WithNextStepParams>
@@ -461,10 +462,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let as_coeffs = as_poly
                 .ifft_using_bitreversed_ntt(&worker, precomputed_omegas_inv.as_ref(), &E::Fr::one())?;
 
-            let commitment = commit_using_monomials(
+            let commitment = commit_using_monomials_gpu(
                 &as_coeffs, 
                 &crs_mons, 
-                &worker
+                &worker,
+                gpu_kern
             )?;
 
             wire_polys_as_coefficients.push(as_coeffs);
@@ -495,13 +497,14 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
     }
 
     pub(crate) fn second_step_from_first_step<CPI: CTPrecomputations<E::Fr>>(
-        first_state: FirstPartialProverState<E, PlonkCsWidth4WithNextStepParams>,
+        mut first_state: FirstPartialProverState<E, PlonkCsWidth4WithNextStepParams>,
         first_verifier_message: FirstVerifierMessage<E, PlonkCsWidth4WithNextStepParams>,
         setup: &SetupPolynomials<E, PlonkCsWidth4WithNextStepParams>,
-        crs_mons: &Crs<E, CrsForMonomialForm>, 
+        crs_mons: &Crs<E, CrsForMonomialForm>,
         setup_precomputations: &Option< &SetupPolynomialsPrecomputations<E, PlonkCsWidth4WithNextStepParams> >,
         precomputed_omegas_inv: &mut PrecomputedOmegas<E::Fr, CPI>,
-        worker: &Worker
+        worker: &Worker,
+        gpu_kern: &mut Option<LockedMultiexpKernel<E>>
     ) -> Result<(
         SecondPartialProverState<E, PlonkCsWidth4WithNextStepParams>,
         SecondProverMessage<E, PlonkCsWidth4WithNextStepParams>
@@ -617,10 +620,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         // interpolate on the main domain
         let z_in_monomial_form = z.ifft_using_bitreversed_ntt(&worker, precomputed_omegas_inv.as_ref(), &E::Fr::one())?;
 
-        let z_commitment = commit_using_monomials(
+        let z_commitment = commit_using_monomials_gpu(
             &z_in_monomial_form, 
             &crs_mons, 
-            &worker
+            &worker,
+            gpu_kern
         )?;
 
         let state = SecondPartialProverState::<E, PlonkCsWidth4WithNextStepParams> {
@@ -628,15 +632,15 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             non_residues: first_state.non_residues,
             input_values: first_state.input_values,
             witness_polys_as_coeffs: first_state.witness_polys_as_coeffs,
-            z_in_monomial_form: z_in_monomial_form,
+            z_in_monomial_form,
 
-            _marker: std::marker::PhantomData
+            _marker: PhantomData
         };
 
         let message = SecondProverMessage::<E, PlonkCsWidth4WithNextStepParams> {
-            z_commitment: z_commitment,
+            z_commitment,
 
-            _marker: std::marker::PhantomData
+            _marker: PhantomData
         };
 
         Ok((state, message))
@@ -646,11 +650,12 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         second_state: SecondPartialProverState<E, PlonkCsWidth4WithNextStepParams>,
         second_verifier_message: SecondVerifierMessage<E, PlonkCsWidth4WithNextStepParams>,
         setup: &SetupPolynomials<E, PlonkCsWidth4WithNextStepParams>,
-        crs_mons: &Crs<E, CrsForMonomialForm>, 
+        crs_mons: &Crs<E, CrsForMonomialForm>,
         setup_precomputations: &Option< &SetupPolynomialsPrecomputations<E, PlonkCsWidth4WithNextStepParams> >,
         precomputed_omegas: &mut PrecomputedOmegas<E::Fr, CP>,
         precomputed_omegas_inv: &mut PrecomputedOmegas<E::Fr, CPI>,
-        worker: &Worker
+        worker: &Worker,
+        gpu_kern: &mut Option<LockedMultiexpKernel<E>>
     ) -> Result<(
         ThirdPartialProverState<E, PlonkCsWidth4WithNextStepParams>,
         ThirdProverMessage<E, PlonkCsWidth4WithNextStepParams>
@@ -978,10 +983,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         };
 
         for t_part in state.t_poly_parts.iter() {
-            let t_part_commitment = commit_using_monomials(
+            let t_part_commitment = commit_using_monomials_gpu(
                 &t_part, 
                 &crs_mons, 
-                &worker
+                &worker,
+                gpu_kern
             )?;
 
             message.quotient_poly_commitments.push(t_part_commitment);
@@ -994,7 +1000,8 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         third_state: ThirdPartialProverState<E, PlonkCsWidth4WithNextStepParams>,
         third_verifier_message: ThirdVerifierMessage<E, PlonkCsWidth4WithNextStepParams>,
         setup: &SetupPolynomials<E, PlonkCsWidth4WithNextStepParams>,
-        worker: &Worker
+        worker: &Worker,
+        x: &mut Option<LockedMultiexpKernel<E>>
     ) -> Result<(
         FourthPartialProverState<E, PlonkCsWidth4WithNextStepParams>,
         FourthProverMessage<E, PlonkCsWidth4WithNextStepParams>
@@ -1222,8 +1229,9 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         mut fourth_state: FourthPartialProverState<E, PlonkCsWidth4WithNextStepParams>,
         fourth_verifier_message: FourthVerifierMessage<E, PlonkCsWidth4WithNextStepParams>,
         setup: &SetupPolynomials<E, PlonkCsWidth4WithNextStepParams>,
-        crs_mons: &Crs<E, CrsForMonomialForm>, 
-        worker: &Worker
+        crs_mons: &Crs<E, CrsForMonomialForm>,
+        worker: &Worker,
+        gpu_kern: &mut Option<LockedMultiexpKernel<E>>
     ) -> Result<FifthProverMessage<E, PlonkCsWidth4WithNextStepParams>, SynthesisError>
     {
         let FourthVerifierMessage { z, v, .. } = fourth_verifier_message;
@@ -1307,16 +1315,18 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         let open_at_z_omega = polys.pop().unwrap().0;
         let open_at_z = polys.pop().unwrap().0;
 
-        let opening_at_z = commit_using_monomials(
+        let opening_at_z = commit_using_monomials_gpu(
             &open_at_z, 
             &crs_mons,
-            &worker
+            &worker,
+            gpu_kern
         )?;
 
-        let opening_at_z_omega = commit_using_monomials(
+        let opening_at_z_omega = commit_using_monomials_gpu(
             &open_at_z_omega, 
             &crs_mons,
-            &worker
+            &worker,
+            gpu_kern
         )?;
 
         let message = FifthProverMessage::<E, PlonkCsWidth4WithNextStepParams> {

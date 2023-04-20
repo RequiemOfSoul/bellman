@@ -27,6 +27,7 @@ use std::io::{Read, Write};
 use crate::byteorder::ReadBytesExt;
 use crate::byteorder::WriteBytesExt;
 use crate::byteorder::BigEndian;
+use crate::gpu::LockedMultiexpKernel;
 
 impl<E: Engine, T: CrsType> PartialEq for Crs<E, T> {
     fn eq(&self, other: &Self) -> bool {
@@ -306,11 +307,15 @@ pub(crate) fn elements_into_representations<E: Engine>(
 {   
     let mut representations = vec![<E::Fr as PrimeField>::Repr::default(); scalars.len()];
     worker.scope(scalars.len(), |scope, chunk| {
-        for (scalar, repr) in scalars.chunks(chunk)
-                    .zip(representations.chunks_mut(chunk)) {
+        for (scalar, repr) in scalars
+            .chunks(chunk)
+            .zip(representations.chunks_mut(chunk))
+        {
             scope.spawn(move |_| {
-                for (scalar, repr) in scalar.iter()
-                                        .zip(repr.iter_mut()) {
+                for (scalar, repr) in scalar
+                    .iter()
+                    .zip(repr.iter_mut())
+                {
                     *repr = scalar.into_repr();
                 }
             });
@@ -342,10 +347,47 @@ pub fn commit_using_monomials<E: Engine>(
 
     let subtime = Instant::now();
 
-    let res = multiexp::dense_multiexp_gpu::<E::G1Affine>(
+    let res = multiexp::dense_multiexp::<E::G1Affine>(
         &worker,
         &crs.g1_bases[..scalars_repr.len()],
         &scalars_repr
+    )?;
+
+    println!("Multiexp taken {:?}", subtime.elapsed());
+
+    println!("Commtiment taken {:?}", now.elapsed());
+
+    Ok(res.into_affine())
+}
+
+pub fn commit_using_monomials_gpu<E: Engine>(
+    poly: &Polynomial<E::Fr, Coefficients>,
+    crs: &Crs<E, CrsForMonomialForm>,
+    worker: &Worker,
+    kern: &mut Option<LockedMultiexpKernel<E>>,
+) -> Result<E::G1Affine, SynthesisError> {
+    println!("Committing coefficients in GPU");
+
+    use std::time::Instant;
+
+    let now = Instant::now();
+
+    let subtime = Instant::now();
+
+    let scalars_repr = elements_into_representations::<E>(
+        &worker,
+        &poly.as_ref()
+    )?;
+
+    println!("Scalars conversion taken {:?}", subtime.elapsed());
+
+    let subtime = Instant::now();
+
+    let res = multiexp::dense_multiexp_gpu::<E::G1Affine>(
+        &worker,
+        &crs.g1_bases[..scalars_repr.len()],
+        &scalars_repr,
+        kern
     )?;
 
     println!("Multiexp taken {:?}", subtime.elapsed());
@@ -378,7 +420,7 @@ pub fn commit_using_values<E: Engine>(
 
     let subtime = Instant::now();
 
-    let res = multiexp::dense_multiexp_gpu::<E::G1Affine>(
+    let res = multiexp::dense_multiexp::<E::G1Affine>(
         &worker,
         &crs.g1_bases,
         &scalars_repr
@@ -403,7 +445,7 @@ pub fn commit_using_raw_values<E: Engine>(
         &values
     )?;
 
-    let res = multiexp::dense_multiexp_gpu::<E::G1Affine>(
+    let res = multiexp::dense_multiexp::<E::G1Affine>(
         &worker,
         &crs.g1_bases[0..values.len()],
         &scalars_repr
@@ -456,7 +498,7 @@ pub fn commit_using_values_on_coset<E: Engine>(
         &poly.as_ref()
     )?;
 
-    let res = multiexp::dense_multiexp_gpu::<E::G1Affine>(
+    let res = multiexp::dense_multiexp::<E::G1Affine>(
         &worker,
         &crs.g1_bases,
         &scalars_repr

@@ -7,6 +7,7 @@ use crate::worker::Worker;
 use crate::plonk::domains::*;
 
 use std::marker::PhantomData;
+use crate::gpu::LockedMultiexpKernel;
 
 use super::cs::*;
 use super::keys::{SetupPolynomials, Proof, SetupPolynomialsPrecomputations};

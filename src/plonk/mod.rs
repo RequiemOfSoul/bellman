@@ -25,8 +25,10 @@ pub use self::better_cs::keys::{SetupPolynomials, SetupPolynomialsPrecomputation
 
 use crate::pairing::Engine;
 use crate::{SynthesisError, Circuit};
+use crate::gpu::LockedMultiexpKernel;
 use crate::worker::Worker;
 use crate::kate_commitment::*;
+use crate::plonk::better_cs::prover::ProverAssembly;
 use self::better_cs::cs::{PlonkCsWidth4WithNextStepParams, PlonkConstraintSystemParams};
 use crate::plonk::commitments::transcript::*;
 use crate::plonk::fft::cooley_tukey_ntt::*;
@@ -143,18 +145,16 @@ pub fn prove_native_by_steps<E: Engine, C: crate::plonk::better_cs::cs::Circuit<
 
     use std::time::Instant;
 
-    let mut assembly = better_cs::prover::ProverAssembly::new_with_size_hints(setup.num_inputs, setup.n);
+    let mut assembly = ProverAssembly::new_with_size_hints(setup.num_inputs, setup.n);
 
     let subtime = Instant::now();
-
     circuit.synthesize(&mut assembly)?;
     assembly.finalize();
-
     println!("Synthesis taken {:?}", subtime.elapsed());
 
     let worker = Worker::new();
-
     let now = Instant::now();
+    let mut gpu_kern = Some(LockedMultiexpKernel::<E>::new(20, false));
 
     let mut transcript = if let Some(p) = transcript_init_params {
         T::new_from_params(p)
@@ -171,10 +171,11 @@ pub fn prove_native_by_steps<E: Engine, C: crate::plonk::better_cs::cs::Circuit<
 
     let (first_state, first_message) =
         assembly.first_step_with_monomial_form_key(
-        &worker,
-        csr_mon_basis,
-        &mut precomputed_omegas_inv
-    )?;
+            &worker,
+            csr_mon_basis,
+            &mut precomputed_omegas_inv,
+            &mut gpu_kern
+        )?;
 
     println!("First step (witness commitment) taken {:?}", subtime.elapsed());
 
@@ -203,15 +204,17 @@ pub fn prove_native_by_steps<E: Engine, C: crate::plonk::better_cs::cs::Circuit<
 
     let subtime = Instant::now();
 
-    let (second_state, second_message) = self::better_cs::prover::ProverAssembly::second_step_from_first_step(
-        first_state,
-        first_verifier_message,
-        &setup,
-        csr_mon_basis,
-        &setup_precomputations,
-        &mut precomputed_omegas_inv,
-        &worker
-    )?;
+    let (second_state, second_message) =
+        self::better_cs::prover::ProverAssembly::second_step_from_first_step(
+            first_state,
+            first_verifier_message,
+            &setup,
+            csr_mon_basis,
+            &setup_precomputations,
+            &mut precomputed_omegas_inv,
+            &worker,
+            &mut gpu_kern
+        )?;
 
     println!("Second step (grand product commitment) taken {:?}", subtime.elapsed());
 
@@ -230,16 +233,18 @@ pub fn prove_native_by_steps<E: Engine, C: crate::plonk::better_cs::cs::Circuit<
 
     let subtime = Instant::now();
 
-    let (third_state, third_message) = self::better_cs::prover::ProverAssembly::third_step_from_second_step(
-        second_state,
-        second_verifier_message,
-        &setup,
-        csr_mon_basis,
-        &setup_precomputations,
-        &mut precomputed_omegas,
-        &mut precomputed_omegas_inv,
-        &worker
-    )?;
+    let (third_state, third_message) =
+        self::better_cs::prover::ProverAssembly::third_step_from_second_step(
+            second_state,
+            second_verifier_message,
+            &setup,
+            csr_mon_basis,
+            &setup_precomputations,
+            &mut precomputed_omegas,
+            &mut precomputed_omegas_inv,
+            &worker,
+            &mut gpu_kern
+        )?;
 
     println!("Third step (quotient calculation and commitment) taken {:?}", subtime.elapsed());
 
@@ -262,12 +267,14 @@ pub fn prove_native_by_steps<E: Engine, C: crate::plonk::better_cs::cs::Circuit<
 
     let subtime = Instant::now();
 
-    let (fourth_state, fourth_message) = self::better_cs::prover::ProverAssembly::fourth_step_from_third_step(
-        third_state,
-        third_verifier_message,
-        &setup,
-        &worker
-    )?;
+    let (fourth_state, fourth_message) =
+        ProverAssembly::fourth_step_from_third_step(
+            third_state,
+            third_verifier_message,
+            &setup,
+            &worker,
+            &mut gpu_kern
+        )?;
 
     println!("Fourth step (openings at z) taken {:?}", subtime.elapsed());
 
@@ -313,7 +320,8 @@ pub fn prove_native_by_steps<E: Engine, C: crate::plonk::better_cs::cs::Circuit<
         fourth_verifier_message,
         &setup,
         csr_mon_basis,
-        &worker
+        &worker,
+        &mut gpu_kern
     )?;
 
     println!("Fifth step (proving opening at z) taken {:?}", subtime.elapsed());
